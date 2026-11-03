@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="si">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YouTube Subscriber</title>
+<style>
+  :root { --bg:#ffffff; --fg:#1a1a1a; --card:#f3f3f3; --accent:#e62117; --muted:#666; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#121212; --fg:#f1f1f1; --card:#1f1f1f; --accent:#ff4e45; --muted:#aaa; color-scheme: dark; }
+  }
+  body { margin:0; padding:24px; background:var(--bg); color:var(--fg);
+         font-family:system-ui,sans-serif; display:flex; justify-content:center; }
+  .box { width:100%; max-width:460px; background:var(--card); padding:20px; border-radius:16px; }
+  h2 { margin-top:0; }
+  textarea { width:100%; box-sizing:border-box; padding:12px; border-radius:10px; min-height:160px;
+             border:1px solid var(--muted); background:var(--bg); color:var(--fg); font-size:15px; }
+  button { width:100%; margin-top:12px; padding:12px; border:0; border-radius:10px;
+           background:var(--accent); color:#fff; font-size:16px; }
+  button:disabled { opacity:.5; }
+  #status { margin-top:14px; color:var(--muted); font-size:14px; line-height:1.7;
+            white-space:pre-wrap; word-break:break-all; }
+</style>
+</head>
+<body>
+<div class="box">
+  <h2>🔔 YouTube Subscriber</h2>
+  <button id="login">1. Google login</button>
+  <textarea id="links" placeholder="Channel links paste කරන්න (එක line එකකට එකක්)&#10;https://youtube.com/@name&#10;https://youtube.com/channel/UC...&#10;@name" style="margin-top:12px"></textarea>
+  <button id="sub">2. Subscribe කරන්න</button>
+  <div id="status"></div>
+</div>
+
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script>
+  const CLIENT_ID = "1091487239681-di03nkc79a2qnnegkgkd897af30relcf.apps.googleusercontent.com";
+  const SCOPE = "https://www.googleapis.com/auth/youtube.force-ssl";
+  const API = "https://www.googleapis.com/youtube/v3/";
+  let token = null;
+  const status = document.getElementById("status");
+  const subBtn = document.getElementById("sub");
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const auth = () => ({ Authorization: "Bearer " + token });
+
+  async function lookup(param, value) {
+    const r = await fetch(`${API}channels?part=id&${param}=${encodeURIComponent(value)}`, { headers: auth() });
+    const j = await r.json();
+    return j.items && j.items[0] ? j.items[0].id : null;
+  }
+
+  // line -> channel id (or null)
+  async function resolveChannel(line) {
+    let m = line.match(/(UC[\w-]{22})/);
+    if (m && (/channel\//.test(line) || /^UC[\w-]{22}$/.test(line))) return m[1];
+    m = line.match(/youtube\.com\/(@[^\/?#\s]+)/) || line.match(/^(@[^\/?#\s]+)$/);
+    if (m) return lookup("forHandle", decodeURIComponent(m[1]));
+    m = line.match(/youtube\.com\/user\/([^\/?#\s]+)/);
+    if (m) return lookup("forUsername", m[1]);
+    return null;
+  }
+
+  async function subscribe(channelId) {
+    const r = await fetch(`${API}subscriptions?part=snippet`, {
+      method: "POST",
+      headers: { ...auth(), "Content-Type": "application/json" },
+      body: JSON.stringify({ snippet: { resourceId: { kind: "youtube#channel", channelId } } }),
+    });
+    if (r.ok) return "🔔 Subscribe උනා";
+    const e = await r.json();
+    const reason = e.error && e.error.errors && e.error.errors[0] && e.error.errors[0].reason;
+    if (reason === "subscriptionDuplicate") return "✅ දැනටමත් subscribe වෙලා";
+    return "❌ " + (e.error ? e.error.message : r.status);
+  }
+
+  document.getElementById("login").onclick = () => {
+    const client = google.accounts.oauth2.initTokenClient({
+      client_id: CLIENT_ID,
+      scope: SCOPE,
+      callback: (resp) => {
+        if (resp.access_token) { token = resp.access_token; status.textContent = "✅ Login උනා"; }
+        else status.textContent = "Login error";
+      },
+    });
+    client.requestAccessToken();
+  };
+
+  subBtn.onclick = async () => {
+    if (!token) { status.textContent = "මුලින් login වෙන්න"; return; }
+    const lines = document.getElementById("links").value
+      .split("\n").map((s) => s.trim()).filter(Boolean);
+    if (!lines.length) { status.textContent = "Links දාන්න"; return; }
+
+    subBtn.disabled = true;
+    const out = [];
+    let ok = 0;
+    for (let i = 0; i < lines.length; i++) {
+      out.push(`${i + 1}. ${lines[i]}\n   ...`);
+      status.textContent = out.join("\n");
+      let result;
+      try {
+        const id = await resolveChannel(lines[i]);
+        result = id ? await subscribe(id) : "❌ Channel එක හොයාගන්න බෑ (@handle link එකක් දාන්න)";
+      } catch (e) {
+        result = "❌ " + e.message;
+      }
+      if (result.startsWith("🔔") || result.startsWith("✅")) ok++;
+      out[i] = `${i + 1}. ${lines[i]}\n   ${result}`;
+      status.textContent = out.join("\n");
+      await sleep(1000);
+    }
+    status.textContent = out.join("\n") + `\n\n${ok}/${lines.length} සාර්ථකයි`;
+    subBtn.disabled = false;
+  };
+</script>
+</body>
+</html>
